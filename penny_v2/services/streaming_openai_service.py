@@ -10,15 +10,18 @@ from penny_v2.core.events import (
     AIResponseEvent,
     SpeakRequestEvent,
     UILogEvent,
+    VisionSummaryEvent, # Added
 )
+from penny_v2.services.context_manager import ContextManager # Added
+
 logger = logging.getLogger(__name__)
 
 class StreamingOpenAIService:
-    def __init__(self, event_bus: EventBus, settings: AppConfig):
+    def __init__(self, event_bus: EventBus, settings: AppConfig, context_manager: ContextManager): # Added context_manager
         self.event_bus = event_bus
         self.settings = settings
+        self.context_manager = context_manager # Added
         self._running = False
-
         self.client = AsyncOpenAI(api_key=self.settings.OPENAI_API_KEY)
 
     async def start(self):
@@ -27,34 +30,54 @@ class StreamingOpenAIService:
             return
         self._running = True
         self.event_bus.subscribe_async(AIQueryEvent, self.handle_query)
+        self.event_bus.subscribe_async(VisionSummaryEvent, self.handle_vision_summary) # Added
         logger.info("StreamingOpenAIService started and listening.")
 
     async def stop(self):
         self._running = False
         logger.info("StreamingOpenAIService stopped.")
 
+    async def handle_vision_summary(self, event: VisionSummaryEvent): # Added
+        """Handles updates to the vision context."""
+        logger.debug(f"Updating vision context: {event.summary[:100]}...")
+        self.context_manager.set_vision_context(event.summary)
+
     async def handle_query(self, event: AIQueryEvent):
-        full_prompt = event.input_text.strip() if event.input_text else ""
+        # Build the prompt using ContextManager
+        full_prompt = self.context_manager.build_prompt(
+            current_input=event.input_text,
+            include_vision=event.include_vision_context
+        ).strip() # Modified
+
         if not full_prompt:
+            logger.warning("Built prompt is empty, skipping query.")
             return
 
-        logger.info(f"[StreamingOpenAI] Prompt: {full_prompt}")
+        logger.info(f"[StreamingOpenAI] Built Prompt: {full_prompt[:200]}...") # Log built prompt
         try:
             model_name = self.settings.get_dynamic_model_name()
-            await self.stream_response(full_prompt, model_name)
+            # Pass the original input for context update later
+            await self.stream_response(full_prompt, model_name, event.input_text, event.instruction) # Added event.input_text and instruction
         except Exception as e:
-            logger.error(f"[StreamingOpenAI] Error: {e}")
+            logger.error(f"[StreamingOpenAI] Error: {e}", exc_info=True) # Added exc_info
 
-    async def stream_response(self, prompt: str, model_name: str):
+    async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None): # Added original_input and instruction
         full_response = []
         buffer = ""
 
+        # Use the instruction if provided, otherwise use a default system prompt
+        system_message_content = instruction or "You are Penny, a sarcastic but helpful AI streaming companion. Respond in a clever, expressive way." # Modified
+
+        messages = [
+                {"role": "system", "content": system_message_content},
+                {"role": "user", "content": prompt},
+            ]
+
+        logger.debug(f"Sending messages to OpenAI: {messages}")
+
         response = await self.client.chat.completions.create(
             model=model_name,
-            messages=[
-                {"role": "system", "content": "You are Penny, a sarcastic but helpful AI streaming companion. Respond in a clever, expressive way."},
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             stream=True,
             temperature=0.7,
             max_tokens=300,
@@ -83,13 +106,19 @@ class StreamingOpenAIService:
             await self.event_bus.publish(
                 UILogEvent(message=f"Penny: {final}", level="INFO")
             )
+            # Update context AFTER getting the full response
+            self.context_manager.update_chat(original_input, final) # Added context update
+            logger.debug(f"Updated chat context. History size: {len(self.context_manager.chat_history)}")
+
 
     def _should_flush(self, buffer: str) -> bool:
         buffer = buffer.strip()
         if not buffer:
             return False
+        # Flush on sentence-ending punctuation
         if any(buffer.endswith(p) for p in [".", "!", "?"]):
             return True
-        if len(buffer) > 20 and any(buffer.endswith(p) for p in [",", ";", ":"]):
+        # Flush on longer pauses (comma, semicolon, colon) after some length
+        if len(buffer.split()) > 5 and any(buffer.endswith(p) for p in [",", ";", ":"]): # Increased word count
             return True
         return False
