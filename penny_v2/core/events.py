@@ -1,6 +1,6 @@
 # penny_v2/core/events.py
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 
 @dataclass
 class BaseEvent:
@@ -76,13 +76,19 @@ class VisionSummaryEvent:
 
 @dataclass
 class SearchRequestEvent(BaseEvent):
+    """Event to request a web search."""
     query: str
-    source: str = "unknown"
+    source: str = "unknown"  # E.g., "twitch_command", "llm_request"
     num_results: int = 3
+    original_user: Optional[str] = None
+    original_context: Optional[str] = None
 
- @dataclass
- class SearchResultEvent(BaseEvent):
+@dataclass
+class SearchResultEvent(BaseEvent):
+    """Event carrying the results of a web search."""
     query: str
     results: List[Dict]
     source: str
+    original_user: Optional[str] = None
+    original_context: Optional[str] = None
     error: Optional[str] = None
