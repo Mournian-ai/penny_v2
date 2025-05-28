@@ -73,3 +73,16 @@ class AppShutdownEvent(BaseEvent):
 class VisionSummaryEvent:
     def __init__(self, summary: str):
         self.summary = summary
+
+@dataclass
+class SearchRequestEvent(BaseEvent):
+    query: str
+    source: str = "unknown"
+    num_results: int = 3
+
+ @dataclass
+ class SearchResultEvent(BaseEvent):
+    query: str
+    results: List[Dict]
+    source: str
+    error: Optional[str] = None
