@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*/__pycache__/
+
+# Virtual env
+.venv/
+
+# dotenv
+.env
+
+# IDE folders
+.vscode/
+.idea/
+
+# Logs and temp files
+*.log
+temp_audio_processing/

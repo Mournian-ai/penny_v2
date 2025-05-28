@@ -1,0 +1,25 @@
+{
+    "window": {
+        "x": 1614,
+        "y": 14,
+        "width": 1112,
+        "height": 1090
+    },
+    "vtuber": {
+        "left_eye": [
+            195,
+            235
+        ],
+        "right_eye": [
+            260,
+            235
+        ],
+        "mouth": [
+            245,
+            306
+        ],
+        "eye_scale": 0.07,
+        "mouth_scale": 0.18,
+        "image_scale": 0.5
+    }
+}
