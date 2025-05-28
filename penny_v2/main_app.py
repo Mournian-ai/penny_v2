@@ -5,8 +5,7 @@ import signal
 import sys
 import os
 from typing import Optional, List, Any
-# import keyboard # Commenting out PTT keyboard listener - needs review
-import threading
+# No 'keyboard' or 'threading' imports for PTT
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
@@ -15,7 +14,7 @@ from qasync import QEventLoop # For integrating asyncio with Qt
 from penny_v2.config import settings
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import AppShutdownEvent, UILogEvent
-from penny_v2.services.context_manager import ContextManager # Added
+from penny_v2.services.context_manager import ContextManager
 
 # Import all your services
 from penny_v2.services.qt_ui_service import QtDashboard
@@ -30,7 +29,7 @@ from penny_v2.vtuber.vtuber_manager import VTuberManagerService
 from penny_v2.services.transcribe_service import TranscribeService
 from penny_v2.services.listening_service import ListeningService
 from penny_v2.vision.vision_service import VisionService
-# from penny_v2.services.ai_service import AIService # Removed
+from penny_v2.services.ptt_controller import PTTController
 
 # Configure logging
 logging.basicConfig(
@@ -58,15 +57,13 @@ class PennyV2QtApp:
         self._shutting_down = False
 
         # --- Instantiate Context Manager ---
-        self.context_manager = ContextManager() # Added
+        self.context_manager = ContextManager()
 
         # --- Initialize Core Services ---
         self.api_client_service = APIClientService(event_bus=self.event_bus, settings=settings)
         self.tts_service = TTSService(event_bus=self.event_bus, settings=settings)
         self.audio_service = AudioService(event_bus=self.event_bus, settings=settings)
-        from penny_v2.services.ptt_controller import PTTController
         self.ptt_controller = PTTController(self.event_bus, self.audio_service, settings)
-        # self._start_ptt_listener_thread() # Keep commented out - see notes
         self.vtuber_manager_service = VTuberManagerService(event_bus=self.event_bus)
         self.transcribe_service = TranscribeService(self.event_bus, settings)
         self.listening_service = ListeningService(self.event_bus, settings)
@@ -76,7 +73,7 @@ class PennyV2QtApp:
         self.ai_service = StreamingOpenAIService(
             event_bus=self.event_bus,
             settings=settings,
-            context_manager=self.context_manager # Passed context_manager
+            context_manager=self.context_manager
         )
 
         # --- Initialize Twitch Integration Services ---
@@ -118,12 +115,13 @@ class PennyV2QtApp:
             self.transcribe_service,
             self.listening_service,
             self.twitch_eventsub_service,
-            self.twitch_chat_service, # Added
+            self.twitch_chat_service,
             self.vision_service,
         ]
 
         self._configure_signal_handlers()
         self._configure_event_logging()
+        # No PTT listener thread started here
         self.qt_app.aboutToQuit.connect(self._handle_about_to_quit)
 
     def _configure_signal_handlers(self):
@@ -140,11 +138,10 @@ class PennyV2QtApp:
                         lambda s, f: asyncio.ensure_future(self._signal_triggered_shutdown(signal.Signals(s)), loop=self.loop)
                     )
 
-    def _start_ptt_listener_thread(self):
-        logger.warning("PTT listener thread is disabled. 'keyboard' library can conflict with Qt and requires root/admin. Use Qt's event filter (only works when focused).")
-        pass # Keep disabled
+    # Removed _start_ptt_listener_thread and listen_for_capslock
 
     def _handle_about_to_quit(self):
+        """Connected to QApplication.aboutToQuit."""
         logger.info("QApplication.aboutToQuit signal received. Initiating shutdown if not already in progress.")
         if not self._shutting_down:
             asyncio.ensure_future(self.shutdown(triggered_by_signal=False, source_description="QApplication.quit"), loop=self.loop)
@@ -158,6 +155,7 @@ class PennyV2QtApp:
         pass
 
     async def start_services(self):
+        """Starts all registered services."""
         logger.info("Starting all services...")
         start_tasks = []
         for service in self._services:
@@ -177,6 +175,7 @@ class PennyV2QtApp:
         logger.info("All service start routines attempted.")
 
     async def stop_services(self):
+        """Stops all registered services gracefully."""
         logger.info("Stopping all services...")
         await self.event_bus.publish(AppShutdownEvent())
         await asyncio.sleep(0.1)
@@ -206,13 +205,12 @@ class PennyV2QtApp:
                     logger.error(f"Error stopping service via task {task_name}: {result}", exc_info=result)
                 else:
                     logger.info(f"Asynchronous stop task {task_name} completed successfully.")
-        else:
-            logger.info("No asynchronous service stop tasks to await.")
-        logger.info("All service stop routines have been initiated and awaited if async.")
+        logger.info("All service stop routines initiated and awaited if async.")
 
     async def shutdown(self, triggered_by_signal: bool = False, source_description: str = "unknown"):
+        """Handles the complete application shutdown sequence."""
         if self._shutting_down:
-            logger.info(f"Shutdown already in progress (requested by {source_description}). Ignoring additional request.")
+            logger.info(f"Shutdown already in progress (requested by {source_description}). Ignoring.")
             return
         self._shutting_down = True
 
@@ -243,9 +241,10 @@ class PennyV2QtApp:
             self.loop.stop()
         else:
             logger.info("Asyncio event loop (qasync) was not running when shutdown requested its stop.")
-        logger.info(f"Penny V2 async shutdown sequence initiated by {source_description} complete. Loop should now terminate.")
+        logger.info(f"Penny V2 async shutdown sequence complete.")
 
     def run(self):
+        """Starts the application and its event loop."""
         logger.info("Penny V2 (Qt) Application starting up...")
         asyncio.ensure_future(self.start_services(), loop=self.loop)
         self.ui_service.show()
@@ -260,20 +259,19 @@ class PennyV2QtApp:
             if not self._shutting_down:
                 if self.loop.is_running():
                     self.loop.run_until_complete(self.shutdown(triggered_by_signal=True, source_description="KeyboardInterrupt"))
-                else:
-                    logger.error("KeyboardInterrupt: Loop stopped before async shutdown could complete.")
             logger.info("KeyboardInterrupt shutdown process finished.")
         except SystemExit as e:
             logger.info(f"SystemExit caught in run() with code: {e.code}")
             exit_code = e.code
         finally:
             logger.info("Run method's finally block executing.")
-            if not self._shutting_down: logger.warning("Loop exited without shutdown sequence.")
+            if not self._shutting_down:
+                 logger.warning("Loop exited without shutdown sequence.")
             if hasattr(self.loop, 'close') and not self.loop.is_closed():
                  logger.info("Closing QEventLoop explicitly in run() finally.")
                  self.loop.close()
             else:
-                logger.info("QEventLoop already closed or close method not found/needed by context manager.")
+                logger.info("QEventLoop already closed or not needed by context manager.")
             logger.info(f"Penny V2 (Qt) Application exiting with code {exit_code}.")
 
 if __name__ == "__main__":
