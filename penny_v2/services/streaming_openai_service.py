@@ -1,124 +1,160 @@
-# penny_v2/services/streaming_openai_service.py
-import logging
-import asyncio
-from openai import AsyncOpenAI
+# penny_v2/services/twitch_token_refresh.py
 
+import os
+import logging
+import aiohttp
+import json # Added
+import time # Added
+from typing import Optional
+from dotenv import load_dotenv, set_key
 from penny_v2.config import AppConfig
-from penny_v2.core.event_bus import EventBus
-from penny_v2.core.events import (
-    AIQueryEvent,
-    AIResponseEvent,
-    SpeakRequestEvent,
-    UILogEvent,
-    VisionSummaryEvent, # Added
-)
-from penny_v2.services.context_manager import ContextManager # Added
 
 logger = logging.getLogger(__name__)
+TWITCH_TOKEN_URL = "https://id.twitch.tv/oauth2/token"
+SETTINGS_FILE = "settings.json" # Define settings file name
 
-class StreamingOpenAIService:
-    def __init__(self, event_bus: EventBus, settings: AppConfig, context_manager: ContextManager): # Added context_manager
-        self.event_bus = event_bus
+class TwitchTokenManager:
+    def __init__(self, settings: AppConfig, env_path: str = ".env"):
         self.settings = settings
-        self.context_manager = context_manager # Added
-        self._running = False
-        self.client = AsyncOpenAI(api_key=self.settings.OPENAI_API_KEY)
+        self.env_path = os.getenv("ENV_PATH", env_path)
 
-    async def start(self):
-        if self._running:
-            logger.info("StreamingOpenAIService already running.")
-            return
-        self._running = True
-        self.event_bus.subscribe_async(AIQueryEvent, self.handle_query)
-        self.event_bus.subscribe_async(VisionSummaryEvent, self.handle_vision_summary) # Added
-        logger.info("StreamingOpenAIService started and listening.")
-
-    async def stop(self):
-        self._running = False
-        logger.info("StreamingOpenAIService stopped.")
-
-    async def handle_vision_summary(self, event: VisionSummaryEvent): # Added
-        """Handles updates to the vision context."""
-        logger.debug(f"Updating vision context: {event.summary[:100]}...")
-        self.context_manager.set_vision_context(event.summary)
-
-    async def handle_query(self, event: AIQueryEvent):
-        # Build the prompt using ContextManager
-        full_prompt = self.context_manager.build_prompt(
-            current_input=event.input_text,
-            include_vision=event.include_vision_context
-        ).strip() # Modified
-
-        if not full_prompt:
-            logger.warning("Built prompt is empty, skipping query.")
-            return
-
-        logger.info(f"[StreamingOpenAI] Built Prompt: {full_prompt[:200]}...") # Log built prompt
+    def _update_settings_json(self, updates: dict):
+        """Reads, updates, and writes settings.json safely."""
+        data = {}
         try:
-            model_name = self.settings.get_dynamic_model_name()
-            # Pass the original input for context update later
-            await self.stream_response(full_prompt, model_name, event.input_text, event.instruction) # Added event.input_text and instruction
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            
+            # Ensure 'tokens' key exists
+            if 'tokens' not in data:
+                data['tokens'] = {}
+
+            data['tokens'].update(updates)
+
+            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+            logger.info(f"Updated token info in {SETTINGS_FILE}: {updates.keys()}")
+
         except Exception as e:
-            logger.error(f"[StreamingOpenAI] Error: {e}", exc_info=True) # Added exc_info
+            logger.error(f"Failed to read/write {SETTINGS_FILE}: {e}", exc_info=True)
 
-    async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None): # Added original_input and instruction
-        full_response = []
-        buffer = ""
+    async def refresh_app_token(self) -> Optional[str]:
+        """
+        Refreshes the Twitch App Access Token and saves its expiry time.
+        """
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": self.settings.TWITCH_CLIENT_ID,
+            "client_secret": self.settings.TWITCH_CLIENT_SECRET,
+        }
 
-        # Use the instruction if provided, otherwise use a default system prompt
-        system_message_content = instruction or "You are Penny, a sarcastic but helpful AI streaming companion. Respond in a clever, expressive way." # Modified
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(TWITCH_TOKEN_URL, data=payload) as response:
+                    response_data = await response.json()
+                    if response.status == 200:
+                        new_access_token = response_data.get("access_token")
+                        expires_in = response_data.get("expires_in")
 
-        messages = [
-                {"role": "system", "content": system_message_content},
-                {"role": "user", "content": prompt},
-            ]
+                        if not new_access_token or expires_in is None: # Check expires_in too
+                            logger.error(f"App token response missing data. Response: {response_data}")
+                            return None
 
-        logger.debug(f"Sending messages to OpenAI: {messages}")
+                        # Calculate expiry timestamp
+                        expires_at = int(time.time()) + expires_in
+                        logger.info(f"App token acquired. Expires in {expires_in}s (at {expires_at}).")
 
-        response = await self.client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            stream=True,
-            temperature=0.7,
-            max_tokens=300,
+                        # Update settings object and .env
+                        self.settings.TWITCH_APP_ACCESS_TOKEN = new_access_token
+                        if os.path.exists(self.env_path):
+                            set_key(self.env_path, "TWITCH_APP_ACCESS_TOKEN", new_access_token)
+                            logger.info("App token saved to .env.")
+                        
+                        # Update settings.json
+                        self._update_settings_json({
+                            "TWITCH_APP_TOKEN_EXPIRES_AT": expires_at
+                        })
+
+                        return new_access_token
+                    else:
+                        logger.error(f"App token request failed. Status: {response.status}")
+                        logger.error(f"Response: {response_data}")
+                        return None
+        except Exception as e:
+            logger.error(f"Exception during App token request: {e}", exc_info=True)
+            return None
+
+    async def refresh_chat_token(self) -> Optional[str]:
+        """
+        Refreshes the Twitch Chat Access Token and saves its expiry time.
+        """
+        return await self._refresh_token(
+            refresh_token=self.settings.TWITCH_CHAT_REFRESH_TOKEN,
+            access_token_key="TWITCH_CHAT_TOKEN",
+            refresh_token_key="TWITCH_CHAT_REFRESH_TOKEN",
+            expires_at_key="TWITCH_CHAT_TOKEN_EXPIRES_AT", # Added key
+            log_context="Chat"
         )
 
-        async for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta.content:
-                token = delta.content
-                full_response.append(token)
-                buffer += token
+    async def _refresh_token(
+        self,
+        refresh_token: str,
+        access_token_key: str,
+        refresh_token_key: str,
+        expires_at_key: str, # Added key
+        log_context: str
+    ) -> Optional[str]:
+        if not refresh_token:
+            logger.error(f"{log_context} Refresh token not set.")
+            return None
 
-                if self._should_flush(buffer):
-                    await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=False))
-                    buffer = ""
+        payload = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": self.settings.TWITCH_CLIENT_ID,
+            "client_secret": self.settings.TWITCH_CLIENT_SECRET,
+        }
 
-        if buffer.strip():
-            await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=False))
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(TWITCH_TOKEN_URL, data=payload) as response:
+                    response_data = await response.json()
+                    if response.status == 200:
+                        new_access_token = response_data.get("access_token")
+                        new_refresh_token = response_data.get("refresh_token")
+                        expires_in = response_data.get("expires_in")
 
-        final = "".join(full_response).strip()
-        if final:
-            logger.info(f"[StreamingOpenAI] Final Response: {final}")
-            await self.event_bus.publish(
-                AIResponseEvent(text_to_speak=final, original_query=prompt)
-            )
-            await self.event_bus.publish(
-                UILogEvent(message=f"Penny: {final}", level="INFO")
-            )
-            # Update context AFTER getting the full response
-            self.context_manager.update_chat(original_input, final) # Added context update
-            logger.debug(f"Updated chat context. History size: {len(self.context_manager.chat_history)}")
+                        if not new_access_token or expires_in is None: # Check expires_in too
+                            logger.error(f"{log_context} Token refresh missing data. Response: {response_data}")
+                            return None
 
+                        # Calculate expiry timestamp
+                        expires_at = int(time.time()) + expires_in
+                        logger.info(f"{log_context} token refreshed. Expires in {expires_in}s (at {expires_at}).")
 
-    def _should_flush(self, buffer: str) -> bool:
-        buffer = buffer.strip()
-        if not buffer:
-            return False
-        # Flush on sentence-ending punctuation
-        if any(buffer.endswith(p) for p in [".", "!", "?"]):
-            return True
-        # Flush on longer pauses (comma, semicolon, colon) after some length
-        if len(buffer.split()) > 5 and any(buffer.endswith(p) for p in [",", ";", ":"]): # Increased word count
-            return True
-        return False
+                        # Update settings object and .env
+                        setattr(self.settings, access_token_key, new_access_token)
+                        keys_to_save_env = {access_token_key: new_access_token}
+                        if new_refresh_token:
+                            setattr(self.settings, refresh_token_key, new_refresh_token)
+                            keys_to_save_env[refresh_token_key] = new_refresh_token
+
+                        if os.path.exists(self.env_path):
+                            for key, value in keys_to_save_env.items():
+                                set_key(self.env_path, key, value)
+                            logger.info(f"{log_context} token saved to .env.")
+
+                        # Update settings.json
+                        self._update_settings_json({
+                            expires_at_key: expires_at
+                        })
+
+                        return new_access_token
+                    else:
+                        logger.error(f"{log_context} Token refresh failed. Status: {response.status}")
+                        logger.error(f"Response: {response_data}")
+                        return None
+        except Exception as e:
+            logger.error(f"Exception during {log_context} token refresh: {e}", exc_info=True)
+            return None
