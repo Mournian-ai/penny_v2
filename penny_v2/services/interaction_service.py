@@ -7,32 +7,33 @@ from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import (
     AppShutdownEvent, UILogEvent, TwitchMessageEvent, SpeakRequestEvent,
-    TwitchUserEvent, AIQueryEvent # Added AIQueryEvent for general queries
+    TwitchUserEvent, AIQueryEvent, SearchRequestEvent, SearchResultEvent
 )
 from penny_v2.services.api_client_service import APIClientService
-# from penny_v2.services.twitch_chat_service import TwitchChatService # If sending text replies to chat
+from penny_v2.services.twitch_chat_service import TwitchChatService
 
 logger = logging.getLogger(__name__)
 
 class InteractionService:
     def __init__(self, event_bus: EventBus, settings: AppConfig,
-                 api_client: APIClientService): #, twitch_chat_service: TwitchChatService
+                 api_client: APIClientService), twitch_chat_service: TwitchChatService):
         self.event_bus = event_bus
         self.settings = settings
         self.api_client = api_client
-        # self.twitch_chat_service = twitch_chat_service
+        self.twitch_chat_service = twitch_chat_service
 
         self._bot_name = settings.TWITCH_NICKNAME.lower()
-        self._command_prefix = getattr(settings, 'COMMAND_PREFIX', '!') # Get prefix from settings or default
+        self._command_prefix = getattr(settings, 'COMMAND_PREFIX', '!') 
 
     async def start(self):
         logger.info("InteractionService starting...")
         self.event_bus.subscribe_async(TwitchMessageEvent, self.handle_twitch_message)
         self.event_bus.subscribe_async(TwitchUserEvent, self.handle_twitch_platform_event)
+        self.event_bus.subscribe_async(SearchResultEvent, self.handle_search_result)
         self.event_bus.subscribe_async(AppShutdownEvent, self.handle_shutdown)
         logger.info("InteractionService started.")
 
-    async def stop(self): # Basic stop, actual work stoppage via event unsubscription or flag
+    async def stop(self): 
         logger.info("InteractionService stopping...")
         logger.info("InteractionService stopped.")
 
@@ -67,7 +68,7 @@ class InteractionService:
                         await self.event_bus.publish(SpeakRequestEvent(text=speech_text))
                     else:
                         logger.warning(f"No speech text from /shout_out API for {target_username}")
-                        # Optionally: await self.event_bus.publish(SpeakRequestEvent(text=f"I couldn't shoutout {target_username} right now."))
+                        await self.event_bus.publish(SpeakRequestEvent(text=f"I couldn't shoutout {target_username} right now."))
                 else: # Missing username for shoutout
                     help_text = f"To shout someone out, {event.username}, please tell me their username, like !shoutout awesome_streamer."
                     await self.event_bus.publish(SpeakRequestEvent(text=help_text))
@@ -80,8 +81,17 @@ class InteractionService:
                     await self.event_bus.publish(AIQueryEvent(input=query_for_ai, instruction=f"User {event.username} asked: "))
                 else:
                     await self.event_bus.publish(SpeakRequestEvent(text=f"What would you like to ask, {event.username}?"))
-            
-            # Add other commands here...
+            elif command == "search":
+                if args:
+                    search_query = " ".join(args)
+                    await self.event_bus.publish(UILogEvent(f"Search command for '{search_query}' from {event.username}.", level="INFO"))
+                    await self.event_bus.publish(SearchRequestEvent(
+                        query=search_query,
+                        source="twitch_command",
+                        original_user=event.username
+                    ))
+                else:
+                    await self.event_bus.publish(SpeakRequestEvent(text=f"What should I search for, {event.username}?"))
 
         # 2. Handle Mentions for /respond_chat (if not already handled by a command)
         # Ensure it's not a command that was already processed
