@@ -32,6 +32,8 @@ from penny_v2.services.transcribe_service import TranscribeService
 from penny_v2.services.listening_service import ListeningService
 from penny_v2.services.vision.vision_service import VisionService
 from penny_v2.services.ptt_controller import PTTController
+from penny_v2.services.search_service import SearchService
+
 
 # Configure logging
 logging.basicConfig(
@@ -74,7 +76,8 @@ class PennyV2QtApp:
         self.transcribe_service = TranscribeService(self.event_bus, settings)
         self.listening_service = ListeningService(self.event_bus, settings)
         self.vision_service = VisionService(event_bus=self.event_bus, settings=settings)
-
+        self.search_service = SearchService(event_bus=self.event_bus, settings=settings)
+        
         # --- Initialize AI Service ---
         self.ai_service = StreamingOpenAIService(
             event_bus=self.event_bus,
@@ -123,6 +126,7 @@ class PennyV2QtApp:
             self.twitch_eventsub_service,
             self.twitch_chat_service,
             self.vision_service,
+            self.search_service,
         ]
 
         self._configure_signal_handlers()
