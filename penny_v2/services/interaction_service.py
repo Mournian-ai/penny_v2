@@ -2,38 +2,37 @@
 import asyncio
 import logging
 import shlex
+from typing import Dict # <--- Make sure this is imported
 
 from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import (
     AppShutdownEvent, UILogEvent, TwitchMessageEvent, SpeakRequestEvent,
-    TwitchUserEvent, AIQueryEvent, SearchRequestEvent, SearchResultEvent
+    TwitchUserEvent, AIQueryEvent,
+    SearchRequestEvent, SearchResultEvent # Make sure these are imported
 )
 from penny_v2.services.api_client_service import APIClientService
-from penny_v2.services.twitch_chat_service import TwitchChatService
 
 logger = logging.getLogger(__name__)
 
 class InteractionService:
     def __init__(self, event_bus: EventBus, settings: AppConfig,
-                 api_client: APIClientService), twitch_chat_service: TwitchChatService):
+                 api_client: APIClientService):
         self.event_bus = event_bus
         self.settings = settings
         self.api_client = api_client
-        self.twitch_chat_service = twitch_chat_service
-
         self._bot_name = settings.TWITCH_NICKNAME.lower()
-        self._command_prefix = getattr(settings, 'COMMAND_PREFIX', '!') 
+        self._command_prefix = getattr(settings, 'COMMAND_PREFIX', '!')
 
     async def start(self):
         logger.info("InteractionService starting...")
         self.event_bus.subscribe_async(TwitchMessageEvent, self.handle_twitch_message)
         self.event_bus.subscribe_async(TwitchUserEvent, self.handle_twitch_platform_event)
-        self.event_bus.subscribe_async(SearchResultEvent, self.handle_search_result)
+        self.event_bus.subscribe_async(SearchResultEvent, self.handle_search_result) # This line is correct
         self.event_bus.subscribe_async(AppShutdownEvent, self.handle_shutdown)
         logger.info("InteractionService started.")
 
-    async def stop(self): 
+    async def stop(self):
         logger.info("InteractionService stopping...")
         logger.info("InteractionService stopped.")
 
@@ -42,12 +41,11 @@ class InteractionService:
 
     async def handle_twitch_message(self, event: TwitchMessageEvent):
         logger.debug(f"Interaction (Chat): {event.username}: {event.message}")
-        
+
         message_content = event.message.strip()
         message_lower = message_content.lower()
         is_command = message_content.startswith(self._command_prefix)
 
-        # 1. Handle Commands
         if is_command:
             try:
                 parts = shlex.split(message_content)
@@ -55,8 +53,6 @@ class InteractionService:
                 args = parts[1:]
             except ValueError:
                 logger.warning(f"Could not parse command: {message_content}")
-                # Optionally send "Invalid command format" to chat or TTS
-                # await self.event_bus.publish(SpeakRequestEvent(text=f"Sorry {event.username}, I didn't understand that command format."))
                 return
 
             if command == "so" or command == "shoutout":
@@ -66,21 +62,10 @@ class InteractionService:
                     speech_text = await self.api_client.get_api_shout_out_text(username=target_username)
                     if speech_text:
                         await self.event_bus.publish(SpeakRequestEvent(text=speech_text))
-                    else:
-                        logger.warning(f"No speech text from /shout_out API for {target_username}")
-                        await self.event_bus.publish(SpeakRequestEvent(text=f"I couldn't shoutout {target_username} right now."))
-                else: # Missing username for shoutout
+                else:
                     help_text = f"To shout someone out, {event.username}, please tell me their username, like !shoutout awesome_streamer."
                     await self.event_bus.publish(SpeakRequestEvent(text=help_text))
-            
-            # Example: A general purpose "ask penny" command that uses the core AI model via /respond
-            elif command == "ask" or command == "penny": # e.g. !ask What is the weather? or !penny tell me a joke
-                if args:
-                    query_for_ai = " ".join(args)
-                    # This will go to your AIService which uses get_ai_core_response_text
-                    await self.event_bus.publish(AIQueryEvent(input=query_for_ai, instruction=f"User {event.username} asked: "))
-                else:
-                    await self.event_bus.publish(SpeakRequestEvent(text=f"What would you like to ask, {event.username}?"))
+
             elif command == "search":
                 if args:
                     search_query = " ".join(args)
@@ -93,26 +78,28 @@ class InteractionService:
                 else:
                     await self.event_bus.publish(SpeakRequestEvent(text=f"What should I search for, {event.username}?"))
 
-        # 2. Handle Mentions for /respond_chat (if not already handled by a command)
-        # Ensure it's not a command that was already processed
+            elif command == "ask" or command == "penny":
+                if args:
+                    query_for_ai = " ".join(args)
+                    await self.event_bus.publish(AIQueryEvent(input_text=query_for_ai, instruction=f"User {event.username} asked: "))
+                else:
+                    await self.event_bus.publish(SpeakRequestEvent(text=f"What would you like to ask, {event.username}?"))
+
+
         elif self._bot_name in message_lower or f"@{self._bot_name}" in message_lower:
             await self.event_bus.publish(UILogEvent(
                 f"Penny mentioned by {event.username}. Calling /respond_chat: {message_content}", level="INFO"
             ))
             speech_text = await self.api_client.get_api_chat_response_text(
                 username=event.username,
-                message_text=message_content # Send the original message content
+                message_text=message_content
             )
             if speech_text:
                 await self.event_bus.publish(SpeakRequestEvent(text=speech_text))
-            else:
-                logger.warning(f"No speech text from /respond_chat API for {event.username}")
-                # Optionally: await self.event_bus.publish(SpeakRequestEvent(text=f"Sorry {event.username}, I'm not sure how to respond to that right now."))
-
 
     async def handle_twitch_platform_event(self, event: TwitchUserEvent):
         logger.info(f"Interaction (Platform Event): {event.event_type} from {event.username or 'N/A'}")
-        
+
         speech_text = await self.api_client.get_api_event_reaction_text(
             event_type=event.event_type,
             username=event.username,
@@ -122,3 +109,24 @@ class InteractionService:
             await self.event_bus.publish(SpeakRequestEvent(text=speech_text))
         else:
             logger.warning(f"No speech text from /react_event API for {event.event_type} by {event.username}")
+
+    async def handle_search_result(self, event: SearchResultEvent):
+        """Handles search results, deciding what to do based on source."""
+        if event.source != "twitch_command":
+            return
+
+        user = event.original_user or "someone"
+
+        if event.error or not event.results:
+            await self.event_bus.publish(SpeakRequestEvent(text=f"Sorry {user}, I couldn't find anything about {event.query}."))
+            return
+
+        # For simple chat commands, feed the top result to the AI for a response.
+        top_result = event.results[0]
+        title = top_result.get('title', 'Unknown Title')
+        snippet = top_result.get('snippet', 'No description available.')
+
+        await self.event_bus.publish(AIQueryEvent(
+            instruction=f"User '{user}' asked to search for '{event.query}'. The top result is '{title}'. Briefly summarize this snippet for them in your voice:",
+            input_text=snippet
+        ))

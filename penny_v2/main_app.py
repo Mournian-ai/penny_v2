@@ -27,10 +27,10 @@ from penny_v2.services.tts_service import TTSService
 from penny_v2.services.twitch_eventsub_service import TwitchEventSubService
 from penny_v2.services.twitch_chat_service import TwitchChatService
 from penny_v2.services.interaction_service import InteractionService
-from penny_v2.services.vtuber.vtuber_manager import VTuberManagerService
+from penny_v2.vtuber.vtuber_manager import VTuberManagerService
 from penny_v2.services.transcribe_service import TranscribeService
 from penny_v2.services.listening_service import ListeningService
-from penny_v2.services.vision.vision_service import VisionService
+from penny_v2.vision.vision_service import VisionService
 from penny_v2.services.ptt_controller import PTTController
 from penny_v2.services.search_service import SearchService
 
@@ -100,7 +100,7 @@ class PennyV2QtApp:
         self.interaction_service = InteractionService(
             event_bus=self.event_bus,
             settings=settings,
-            api_client=self.api_client_service
+            api_client=self.api_client_service,
         )
 
         # --- Initialize UI Service (QtDashboard) ---

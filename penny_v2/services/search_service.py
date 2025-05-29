@@ -106,6 +106,7 @@ class SearchService:
         except Exception as e:
             await self.event_bus.publish(UILogEvent(f"Search failed for '{query}': {e}", level="ERROR"))
             return []
+        
     async def handle_search_request(self, event: SearchRequestEvent):
         """Handles incoming search requests from the event bus."""
         logger.info(f"Handling SearchRequestEvent for '{event.query}' from {event.source}")

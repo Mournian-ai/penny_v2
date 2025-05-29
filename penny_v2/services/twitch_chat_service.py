@@ -20,11 +20,23 @@ class TwitchBot(commands.Bot): # Using commands.Bot for potential command handli
         self.event_bus_instance = event_bus_instance
         self.app_config = app_config
         self.api_client_service = api_client_service
+        raw_token = app_config.TWITCH_CHAT_TOKEN
+        login_token = None
+        if raw_token:
+            if not raw_token.startswith('oauth:'):
+                login_token = f"oauth:{raw_token}"  # Ensure token starts with 'oauth:'
+                logger.debug("TWITCH_CHAT_TOKEN modified to include 'oauth:' prefix.")
+            else:
+                login_token = raw_token # Token doesn't need modification if it already starts with 'oauth:'
+        else:
+            logger.critical("TWITCH_CHAT_TOKEN is missing or empty! Twitch bot may fail to connect.") # Twitch will fail to connect and error out if token is invalid or missing.
+
         super().__init__(
-            token=app_config.TWITCH_CHAT_TOKEN, # This should be the bot's OAuth token (e.g., "oauth:yourtoken")
-            prefix=getattr(app_config, 'COMMAND_PREFIX', '!'), # Get prefix from settings or default to '!'
-            initial_channels=[app_config.TWITCH_CHANNEL.lower()] # Channel names should be lowercase
+            token=login_token,
+            prefix=getattr(app_config, 'COMMAND_PREFIX', '!'), 
+            initial_channels=[app_config.TWITCH_CHANNEL.lower()] 
         )
+    
         logger.debug(f"TwitchBot initialized for channel: {app_config.TWITCH_CHANNEL.lower()} with prefix: '{self._prefix}'")
 
     async def event_ready(self):

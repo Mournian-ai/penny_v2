@@ -1,9 +1,9 @@
 {
     "window": {
         "x": 1614,
-        "y": 14,
+        "y": 16,
         "width": 1112,
-        "height": 1090
+        "height": 1270
     },
     "vtuber": {
         "left_eye": [
@@ -21,5 +21,9 @@
         "eye_scale": 0.07,
         "mouth_scale": 0.18,
         "image_scale": 0.5
+    },
+    "tokens": {
+        "TWITCH_APP_TOKEN_EXPIRES_AT": 1754173743,
+        "TWITCH_CHAT_TOKEN_EXPIRES_AT": 1748489153
     }
 }

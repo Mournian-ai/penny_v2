@@ -38,7 +38,8 @@ class AppConfig(BaseSettings):
     PIPER_PATH: str
     PIPER_VOICE_MODEL: str
     TTS_OUTPUT_DEVICE_NAME: str  # Substring of the VB Cable input name
-
+    GOOGLE_API_KEY: str
+    GOOGLE_CSE_ID: str
     # Audio Settings
     INPUT_DEVICE_NAME_SUBSTRING: Optional[str] = None  # For mic input if different from transcription VAC
     PTT_KEY: str = "caps lock"
