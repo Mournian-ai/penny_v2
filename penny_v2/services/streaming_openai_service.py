@@ -2,7 +2,7 @@
 import logging
 import asyncio
 from openai import AsyncOpenAI
-
+import re
 from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import (
@@ -17,7 +17,7 @@ from penny_v2.core.events import (
 from penny_v2.services.context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
-
+SEARCH_TAG_PATTERN = re.compile(r"\[SEARCH\]\s*\"(.*?)\"")
 class StreamingOpenAIService:
     def __init__(self, event_bus: EventBus, settings: AppConfig, context_manager: ContextManager):
         self.event_bus = event_bus
@@ -59,7 +59,7 @@ class StreamingOpenAIService:
         logger.info(f"[StreamingOpenAI] Built Prompt: {full_prompt[:200]}...")
         try:
             model_name = self.settings.get_dynamic_model_name()
-            await self.stream_response(full_prompt, model_name, event.input_text, event.instruction) 
+            await self.stream_response(full_prompt, model_name, event.input_text, event.instruction, full_prompt)
         except Exception as e:
             logger.error(f"[StreamingOpenAI] Error: {e}", exc_info=True)
             
@@ -91,9 +91,17 @@ class StreamingOpenAIService:
     async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None, original_context: str | None): # <--- Added original_context
         full_response = []
         buffer = ""
-
-        system_message_content = instruction or "You are Penny, a sarcastic but helpful AI streaming companion. If you need to search the web, respond ONLY with [SEARCH] \"your search query here\"."
-
+        default_penny_instructions = (
+            "You are Penny, a sarcastic but helpful AI streaming companion. "
+            "You love Mournian, but also really enjoy giving him a hard time. "
+            "Respond directly as Penny. Your output should only be Penny's speech. "
+            "Do not include any role indicators like '[Assistant]', '[Penny]', or similar tags in your response, "
+            "unless it is a specialized command like [SEARCH]. "
+            "If you need to search the web to find information, respond ONLY with the exact format: [SEARCH] \"your search query here\"."
+        )
+        system_message_content = instruction or default_penny_instructions
+        if instruction and "[SEARCH]" not in instruction.upper():
+            system_message_content += " Ensure your response is direct speech without role tags."
         messages = [
                 {"role": "system", "content": system_message_content},
                 {"role": "user", "content": prompt},

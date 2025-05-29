@@ -11,7 +11,7 @@ def remove_emojis(text: str) -> str:
     if not text:
         return ""
     emoji_pattern = regex.compile(
-        r'[\p{Emoji_Presentation}\p{Emoji}\p{Extended_Pictographic}\p{So}\p{Cn}]',
+        r'[\p{Emoji_Presentation}\p{Emoji}\p{Extended_Pictographic}]',
         flags=regex.UNICODE
     )
     return emoji_pattern.sub(r'', text)

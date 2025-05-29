@@ -296,11 +296,11 @@ class TTSService:
             playback_finished_future = loop.run_in_executor(
                 None, self._blocking_play_audio, samples, audio.frame_rate, stop_event
             )
+            stop_event_task = asyncio.create_task(stop_event.wait(), name="TTSStopEventWaitTask")
             
-            # Wait for either playback to finish or the stop_event to be set
             done, pending = await asyncio.wait(
-                [playback_finished_future, stop_event.wait()],
-                return_when=asyncio.FIRST_COMPLETED
+                [playback_finished_future, stop_event_task], # Pass the task here
+                return_when=asyncio.FIRST_COMPLETED     
             )
 
             if stop_event.is_set():
