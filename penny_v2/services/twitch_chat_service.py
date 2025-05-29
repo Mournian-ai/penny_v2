@@ -108,12 +108,6 @@ class TwitchChatService:
             logger.error("TWITCH_TOKEN, TWITCH_NICKNAME, or TWITCH_CHANNEL not configured. Twitch Chat Service cannot start.")
             await self.event_bus.publish(UILogEvent("Twitch Chat config missing (token, nick, or channel).", level="CRITICAL"))
             return
-        
-        # Ensure TWITCH_TOKEN starts with 'oauth:'
-        if not self.settings.TWITCH_CHAT_TOKEN.startswith('oauth:'):
-            logger.error("TWITCH_TOKEN does not appear to be a valid OAuth token (should start with 'oauth:').")
-            await self.event_bus.publish(UILogEvent("Invalid TWITCH_TOKEN format for Chat.", level="CRITICAL"))
-            # return # Optionally prevent start if token format is wrong
 
         logger.info("TwitchChatService starting...")
         self._is_running = True
