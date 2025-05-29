@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 
 from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
-from penny_v2.core.events import UILogEvent, SpeakRequestEvent
+from penny_v2.core.events import UILogEvent, SpeakRequestEvent, VisionSummaryEvent
 logger = logging.getLogger(__name__)
 
 class VisionService:
@@ -80,7 +80,7 @@ class VisionService:
             caption = response.choices[0].message.content.strip()
             logger.info(f"[VisionService] GPT-4o Vision response: {caption}")
             await self.event_bus.publish(UILogEvent("vision", caption))
-
+            await self.event_bus.publish(VisionSummaryEvent(summary=caption))
             if caption != "[NO COMMENT]":
                 await self.event_bus.publish(SpeakRequestEvent(text=caption))
 
