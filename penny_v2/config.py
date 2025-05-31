@@ -44,7 +44,7 @@ class AppConfig(BaseSettings):
     INPUT_DEVICE_NAME_SUBSTRING: Optional[str] = None  # For mic input if different from transcription VAC
     PTT_KEY: str = "caps lock"
     VTUBER_AUDIO_DEVICE_NAME: str
-    
+    TTS_TARGET_SAMPLE_RATE: int = 48000  # Default sample rate for TTS output
     # VTuber - Define paths to your assets
     VTUBER_ASSETS_PATH: str = "./vtuber/assets/"
     VTUBER_BASE_IMAGE: str = "body.png"
