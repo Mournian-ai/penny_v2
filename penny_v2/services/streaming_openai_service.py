@@ -12,7 +12,8 @@ from penny_v2.core.events import (
     UILogEvent,
     VisionSummaryEvent,
     SearchRequestEvent,
-    SearchResultEvent
+    SearchResultEvent,
+    ExternalTranscriptEvent
 )
 from penny_v2.services.context_manager import ContextManager
 
@@ -34,12 +35,13 @@ class StreamingOpenAIService:
         self.event_bus.subscribe_async(AIQueryEvent, self.handle_query)
         self.event_bus.subscribe_async(VisionSummaryEvent, self.handle_vision_summary)
         self.event_bus.subscribe_async(SearchResultEvent, self.handle_search_result)
+        self.event_bus.subscribe_async(ExternalTranscriptEvent, self.handle_external_transcript)
         logger.info("StreamingOpenAIService started and listening.")
 
     async def stop(self):
         self._running = False
         logger.info("StreamingOpenAIService stopped.")
-
+  
     async def handle_vision_summary(self, event: VisionSummaryEvent):
         """Handles updates to the vision context."""
         logger.debug(f"Updating vision context: {event.summary[:100]}...")
@@ -87,8 +89,37 @@ class StreamingOpenAIService:
         logger.info(f"Sending updated prompt to LLM after search: {new_prompt[:200]}...")
         model_name = self.settings.get_dynamic_model_name()
         await self.stream_response(new_prompt, model_name, new_prompt, "Continue the task using search results.", None)
+
+    async def handle_external_transcript(self, event: ExternalTranscriptEvent):
+        transcript = event.text.strip()
+        if not transcript:
+            return
+        logger.info(f"[StreamingOpenAI] Received external transcript: {transcript}")
         
-    async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None, original_context: str | None): # <--- Added original_context
+        # Build prompt and run through existing flow
+        full_prompt = self.context_manager.build_prompt(
+            current_input=transcript,
+            include_vision=False
+        ).strip()
+    
+        if not full_prompt:
+            logger.warning("Built prompt from transcript is empty, skipping.")
+            return
+    
+        try:
+            model_name = self.settings.get_dynamic_model_name()
+            await self.stream_response(
+                prompt=full_prompt,
+                model_name=model_name,
+                original_input=transcript,
+                instruction=None,
+                original_context=None,
+                collab_mode=True  # <<< tell TTSService it's a collab response
+            )
+        except Exception as e:
+            logger.error(f"[StreamingOpenAI] Error from external transcript: {e}", exc_info=True)
+
+    async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None, original_context: str | None, collab_mode: bool = False):
         full_response = []
         buffer = ""
         default_penny_instructions = (
@@ -146,11 +177,11 @@ class StreamingOpenAIService:
             for token in full_response:
                 buffer += token
                 if self._should_flush(buffer):
-                    await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=False))
+                    await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=collab_mode))
                     buffer = ""
 
             if buffer.strip():
-                await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=False))
+                await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=collab_mode))
             if final:
                 await self.event_bus.publish(
                     AIResponseEvent(text_to_speak=final, original_query=prompt)
