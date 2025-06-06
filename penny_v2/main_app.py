@@ -4,19 +4,19 @@ import logging
 import signal
 import sys
 import os
-import json # Added
-import time # Added
+import json 
+import time 
 from typing import Optional, List, Any
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
-from qasync import QEventLoop # For integrating asyncio with Qt
+from qasync import QEventLoop 
 
 from penny_v2.config import settings
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import AppShutdownEvent, UILogEvent
 from penny_v2.services.context_manager import ContextManager
-from penny_v2.services.twitch_token_refresh import TwitchTokenManager # Added
+from penny_v2.services.twitch_token_refresh import TwitchTokenManager 
 
 # Import all your services
 from penny_v2.services.qt_ui_service import QtDashboard
@@ -33,7 +33,7 @@ from penny_v2.services.listening_service import ListeningService
 from penny_v2.vision.vision_service import VisionService
 from penny_v2.services.ptt_controller import PTTController
 from penny_v2.services.search_service import SearchService
-
+from penny_v2.network import ws_server
 
 # Configure logging
 logging.basicConfig(
@@ -239,6 +239,7 @@ class PennyV2QtApp:
                     logger.error(f"Error starting service via task {task_name}: {result}", exc_info=result)
                 else:
                     logger.info(f"Service task {task_name} initiated.")
+        await ws_server.start_ws_server() 
         logger.info("All service start routines attempted.")
 
     async def stop_services(self):
