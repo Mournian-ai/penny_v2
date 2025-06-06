@@ -96,3 +96,4 @@ class SearchResultEvent(BaseEvent):
 @dataclass
 class ExternalTranscriptEvent(BaseEvent):
     text: str
+    speaker: str
