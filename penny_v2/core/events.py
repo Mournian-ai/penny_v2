@@ -92,3 +92,7 @@ class SearchResultEvent(BaseEvent):
     original_user: Optional[str] = None
     original_context: Optional[str] = None
     error: Optional[str] = None
+
+@dataclass
+class ExternalTranscriptEvent(BaseEvent):
+    text: str
