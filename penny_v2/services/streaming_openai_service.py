@@ -92,13 +92,15 @@ class StreamingOpenAIService:
 
     async def handle_external_transcript(self, event: ExternalTranscriptEvent):
         transcript = event.text.strip()
+        speaker = event.speaker.strip() or "Unknown"
+    
         if not transcript:
             return
-        logger.info(f"[StreamingOpenAI] Received external transcript: {transcript}")
-        
-        # Build prompt and run through existing flow
+    
+        logger.info(f"[StreamingOpenAI] Received external transcript from {speaker}: {transcript}")
+    
         full_prompt = self.context_manager.build_prompt(
-            current_input=transcript,
+            current_input=f"{speaker} said: {transcript}",
             include_vision=False
         ).strip()
     
@@ -114,7 +116,7 @@ class StreamingOpenAIService:
                 original_input=transcript,
                 instruction=None,
                 original_context=None,
-                collab_mode=True  # <<< tell TTSService it's a collab response
+                collab_mode=True
             )
         except Exception as e:
             logger.error(f"[StreamingOpenAI] Error from external transcript: {e}", exc_info=True)
