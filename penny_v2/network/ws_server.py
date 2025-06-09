@@ -12,7 +12,7 @@ async def handler(websocket):
         async for message in websocket:
             data = json.loads(message)
             text = data.get("text", "").strip()
-            speaker = data.get("speaker", "Unknown")
+            speaker = data.get("username", "Unknown")
             if text:
                 EventBus.get_instance().publish(ExternalTranscriptEvent(text=text, speaker=speaker))
     except websockets.exceptions.ConnectionClosed:
