@@ -6,8 +6,6 @@ from penny_v2.core.events import ExternalTranscriptEvent
 
 connected_clients = set()
 
-connected_clients = set()
-
 async def handler(websocket):
     """Handles incoming WebSocket messages and routes them based on type."""
     logging.info("Client connected.")
