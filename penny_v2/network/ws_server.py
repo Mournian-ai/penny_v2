@@ -2,7 +2,7 @@ import asyncio
 import websockets
 import logging
 from penny_v2.core.event_bus import EventBus
-from penny_v2.core.events import ExternalTranscriptEvent
+from penny_v2.core.events import ExternalTranscriptEvent, UILogEvent
 
 connected_clients = set()
 
