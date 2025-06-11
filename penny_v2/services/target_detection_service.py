@@ -2,12 +2,14 @@
 import asyncio
 import logging
 from openai import AsyncOpenAI
+from typing import Any
 from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import (
     ExternalTranscriptEvent,
     TargetDetectedEvent,
     UILogEvent,
+    TranscriptionAvailableEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,15 +22,18 @@ class TargetDetectionService:
 
     async def start(self):
         self.event_bus.subscribe_async(ExternalTranscriptEvent, self.handle_transcript)
+        self.event_bus.subscribe_async(TranscriptionAvailableEvent, self.handle_transcript)
         logger.info("[TargetDetectionService] Started and subscribed to ExternalTranscriptEvent.")
         self.event_bus.emit(UILogEvent("[TargetDetectionService] Ready to evaluate targets."))
 
-    async def handle_transcript(self, event: ExternalTranscriptEvent):
-        transcript = event.text.strip()
+    async def handle_transcript(self, event: Any):
+        transcript = getattr(event, "text", "").strip()
+        speaker = getattr(event, "speaker", "LocalUser")
+
         if not transcript:
+            logger.debug("[TargetDetectionService] Received empty transcript, skipping.")
             return
 
-        speaker = event.speaker or "Unknown"
         try:
             logger.debug(f"[TargetDetectionService] Checking if '{transcript}' from {speaker} is directed at Penny.")
             is_targeted, confidence, reason = await self.evaluate_target(transcript)
@@ -48,6 +53,7 @@ class TargetDetectionService:
             self.event_bus.emit(UILogEvent(
                 f"[TargetDetectionService] ERROR during evaluation: {e}"
             ))
+
 
     async def evaluate_target(self, message: str) -> tuple[bool, float, str]:
         # Fast keyword match shortcut
