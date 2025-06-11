@@ -13,6 +13,7 @@ from typing import Optional
 from penny_v2.config import AppConfig
 from penny_v2.core.event_bus import EventBus
 from penny_v2.core.events import (
+    EmotionTagEvent,
     SpeakRequestEvent, TTSSpeakingStateEvent, UILogEvent, AppShutdownEvent, AudioRMSVolumeEvent
 )
 from penny_v2.utils.helpers import remove_emojis, find_audio_device_id
@@ -229,6 +230,34 @@ class TTSService:
             # --- Load with Pydub and Modify Audio ---
             try:
                 audio = AudioSegment.from_wav(tmp_wav_path)
+            # Modify pitch/speed based on emotion/tone
+            speed = 1.0
+            pitch_shift = 0
+
+            if self.current_emotion == "sad":
+                speed = 0.9
+                pitch_shift = -2
+            elif self.current_emotion == "excited":
+                speed = 1.2
+                pitch_shift = 2
+            elif self.current_emotion == "angry":
+                speed = 1.1
+                pitch_shift = 3
+            elif self.current_emotion == "amused":
+                speed = 1.05
+                pitch_shift = 1
+            elif self.current_tone == "sarcastic":
+                pitch_shift = -1
+
+            if pitch_shift != 0:
+                segment = segment._spawn(segment.raw_data, overrides={
+                    "frame_rate": int(segment.frame_rate * (2.0 ** (pitch_shift / 12.0)))
+                }).set_frame_rate(segment.frame_rate)
+
+            if speed != 1.0:
+                segment = segment._spawn(segment.raw_data, overrides={
+                    "frame_rate": int(segment.frame_rate * speed)
+                }).set_frame_rate(segment.frame_rate)
             except CouldntDecodeError:
                 logger.error(f"Pydub could not decode WAV file: {tmp_wav_path}")
                 await self.event_bus.publish(UILogEvent(message="Error decoding TTS audio.", level="ERROR"))
@@ -415,3 +444,9 @@ class TTSService:
         logger.info(f"TTS Collab mode {status}.")
         asyncio.create_task(self.event_bus.publish(UILogEvent(message=f"TTS Collab Mode {status}", level="CONFIG")))
         # Actual collab mode logic (e.g., sending audio to a different output or API) would go here.
+
+
+    def handle_emotion_tag(self, event: EmotionTagEvent):
+        self.current_tone = event.tone
+        self.current_emotion = event.emotion
+        self.event_bus.emit(UILogEvent(f"[TTSService] Emotion updated: Tone = {event.tone}, Emotion = {event.emotion}"))

@@ -97,3 +97,17 @@ class SearchResultEvent(BaseEvent):
 class ExternalTranscriptEvent(BaseEvent):
     text: str
     speaker: str
+
+
+@dataclass
+class EmotionTagEvent(BaseEvent):
+    tone: str
+    emotion: str
+
+@dataclass
+class TargetDetectedEvent(BaseEvent):
+    speaker: str
+    text: str
+    is_targeted: bool
+    confidence: float
+    reason: str
