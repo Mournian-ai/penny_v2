@@ -9,7 +9,7 @@ from penny_v2.core.events import (
     ExternalTranscriptEvent,
     TargetDetectedEvent,
     UILogEvent,
-    TranscriptionAvailableEvent,
+    TranscriptionAvailableEvent
 )
 
 logger = logging.getLogger(__name__)

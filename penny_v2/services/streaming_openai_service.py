@@ -16,7 +16,8 @@ from penny_v2.core.events import (
     SearchRequestEvent,
     SearchResultEvent,
     ExternalTranscriptEvent,
-    EmotionTagEvent
+    EmotionTagEvent,
+    TargetDetectedEvent
 )
 from penny_v2.services.context_manager import ContextManager
 
@@ -30,6 +31,9 @@ class StreamingOpenAIService:
         self.context_manager = context_manager 
         self._running = False
         self.client = AsyncOpenAI(api_key=self.settings.OPENAI_API_KEY)
+        self.last_target_result = None
+        self.event_bus.subscribe_async(TargetDetectedEvent, self.handle_target_check)
+
 
     async def start(self):
         if self._running:
@@ -41,6 +45,11 @@ class StreamingOpenAIService:
         self.event_bus.subscribe_async(SearchResultEvent, self.handle_search_result)
         self.event_bus.subscribe_async(ExternalTranscriptEvent, self.handle_external_transcript)
         logger.info("StreamingOpenAIService started and listening.")
+
+    async def handle_target_check(self, event: TargetDetectedEvent):
+        self.last_target_result = event
+        logger.debug(f"[StreamingOpenAIService] TargetDetection received: {event.is_targeted} ({event.confidence:.2f}) - {event.reason}")
+
 
     async def stop(self):
         self._running = False
@@ -59,7 +68,11 @@ class StreamingOpenAIService:
         if not full_prompt:
             logger.warning("Built prompt is empty, skipping query.")
             return
-
+        
+        if not self.last_target_result.is_targeted and self.last_target_result.confidence >= 0.6:
+                logger.info("[StreamingOpenAIService] Ignoring input — not directed at Penny.")
+                self.event_bus.emit(UILogEvent("[StreamingOpenAIService] Skipped response: user was not talking to Penny."))
+                return
         logger.info(f"[StreamingOpenAI] Built Prompt: {full_prompt[:200]}...")
         try:
             model_name = self.settings.get_dynamic_model_name()
