@@ -103,3 +103,11 @@ class ExternalTranscriptEvent(BaseEvent):
 class EmotionTagEvent(BaseEvent):
     tone: str
     emotion: str
+
+@dataclass
+class TargetDetectedEvent(BaseEvent):
+    speaker: str
+    text: str
+    is_targeted: bool
+    confidence: float
+    reason: str
