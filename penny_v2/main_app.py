@@ -33,6 +33,7 @@ from penny_v2.services.listening_service import ListeningService
 from penny_v2.vision.vision_service import VisionService
 from penny_v2.services.ptt_controller import PTTController
 from penny_v2.services.search_service import SearchService
+from penny_v2.services.target_detection_service import TargetDetectionService
 from penny_v2.network import ws_server
 
 # Configure logging
@@ -56,15 +57,17 @@ class PennyV2QtApp:
 
         self.loop = QEventLoop(self.qt_app)
         asyncio.set_event_loop(self.loop)
-
         self.event_bus = EventBus()
         self._services: List[Any] = []
         self._shutting_down = False
 
+        # --- Initialize Target Manager ---- 
+        self.target_detection_service = TargetDetectionService(self.event_bus, settings)
+
         # --- Instantiate Context Manager ---
         self.context_manager = ContextManager()
 
-        # --- Instantiate Token Manager --- # Added Section
+        # --- Instantiate Token Manager --- 
         self.token_manager = TwitchTokenManager(settings=settings)
 
         # --- Initialize Core Services ---
@@ -127,6 +130,7 @@ class PennyV2QtApp:
             self.twitch_chat_service,
             self.vision_service,
             self.search_service,
+            self.target_detection_service,
         ]
 
         self._configure_signal_handlers()
