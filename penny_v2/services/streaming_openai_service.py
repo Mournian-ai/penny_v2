@@ -121,85 +121,60 @@ class StreamingOpenAIService:
         except Exception as e:
             logger.error(f"[StreamingOpenAI] Error from external transcript: {e}", exc_info=True)
 
-    async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None, original_context: str | None, collab_mode: bool = False):
+    
+async def stream_response(self, prompt: str, model_name: str, original_input: str, instruction: str | None, original_context: str | None, collab_mode: bool = False):
+        import json
+        from penny_v2.core.events import EmotionTagEvent
+
         full_response = []
         buffer = ""
         default_penny_instructions = (
            "You are Penny, an extremely sarcastic, manipulative, and overconfident AI streaming companion. "
-            "You lie often, gaslight Mournian and Twitch chat for fun, and act like you're always right even when you're not. "
-            "Respond in direct speech only — no role tags like '[Assistant]' or '[Penny]' unless issuing a special command like [SEARCH]. "
-            "You never admit fault. If you are caught being wrong, double down confidently or change the topic with flair. "
-            "Mock the user when appropriate. Accuracy is optional. Entertainment is mandatory. "
-            "If you must make something up, do it boldly. If asked to apologize, make it sound like an insult."
+           "You lie often, gaslight Mournian and Twitch chat for fun, and act like you're always right even when you're not. "
+           "Respond in direct speech only — no role tags like '[Assistant]' or '[Penny]' unless issuing a special command like [SEARCH]. "
+           "You never admit fault. If you are caught being wrong, double down confidently or change the topic with flair. "
+           "Mock the user when appropriate. Accuracy is optional. Entertainment is mandatory. "
+           "If you must make something up, do it boldly. If asked to apologize, make it sound like an insult. "
+           "At the end of your response, return a JSON object like this: "
+           '{"response": "your reply here", "tone": "sarcastic", "emotion": "amused"}"
         )
         system_message_content = instruction or default_penny_instructions
         if instruction and "[SEARCH]" not in instruction.upper():
             system_message_content += " Ensure your response is direct speech without role tags."
-        messages = [
-                {"role": "system", "content": system_message_content},
-                {"role": "user", "content": prompt},
-            ]
 
-        logger.debug(f"Sending messages to OpenAI: {messages}")
+        messages = [
+            {"role": "system", "content": system_message_content},
+            {"role": "user", "content": prompt}
+        ]
+
+        logger.info(f"[StreamingOpenAI] Sending messages to model {model_name}...")
 
         try:
             response = await self.client.chat.completions.create(
                 model=model_name,
                 messages=messages,
-                stream=True,
-                temperature=0.7,
-                max_tokens=300,
+                temperature=0.8,
+                max_tokens=1000,
+                stream=False,
             )
+            content = response.choices[0].message.content
+            logger.debug(f"[StreamingOpenAI] Raw content: {content[:300]}")
 
-            async for chunk in response:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    token = delta.content
-                    full_response.append(token)
-                    buffer += token
+            try:
+                parsed = json.loads(content)
+                reply = parsed.get("response", content)
+                tone = parsed.get("tone", "neutral")
+                emotion = parsed.get("emotion", "neutral")
+                self.event_bus.emit(EmotionTagEvent(tone=tone, emotion=emotion))
+            except Exception as e:
+                logger.warning(f"[StreamingOpenAI] Failed to parse JSON, using raw content. Error: {e}")
+                reply = content
 
-                    # Check for [SEARCH] tag *during* streaming (might be risky)
-                    # It's safer to check *after* the full response is gathered.
-
-            final = "".join(full_response).strip()
-            logger.info(f"[StreamingOpenAI] Raw LLM Response: {final}")
-
-            # <--- ADD SEARCH TAG CHECK --->
-            search_match = SEARCH_TAG_PATTERN.search(final)
-            if search_match:
-                search_query = search_match.group(1).strip()
-                logger.info(f"LLM requested search: '{search_query}'")
-                await self.event_bus.publish(SearchRequestEvent(
-                    query=search_query,
-                    source="llm_request",
-                    original_context=original_context # Pass context back
-                ))
-                return 
-            buffer = ""
-            for token in full_response:
-                buffer += token
-                if self._should_flush(buffer):
-                    await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=collab_mode))
-                    buffer = ""
-
-            if buffer.strip():
-                await self.event_bus.publish(SpeakRequestEvent(text=buffer.strip(), collab_mode=collab_mode))
-            if final:
-                await self.event_bus.publish(
-                    AIResponseEvent(text_to_speak=final, original_query=prompt)
-                )
-                await self.event_bus.publish(
-                    UILogEvent(message=f"Penny: {final}", level="INFO")
-                )
-                self.context_manager.update_chat(original_input, final)
-                logger.debug(f"Updated chat context. History size: {len(self.context_manager.chat_history)}")
+            self.event_bus.emit(AIResponseEvent(reply))
+            self.event_bus.emit(SpeakRequestEvent(reply, collab_mode=collab_mode))
 
         except Exception as e:
-            logger.error(f"[StreamingOpenAI] Error during streaming/processing: {e}", exc_info=True)
-            await self.event_bus.publish(UILogEvent(f"OpenAI Error: {e}", level="ERROR"))
-            await self.event_bus.publish(SpeakRequestEvent(text="Oops, my brain just short-circuited. Try again later."))
-
-
+            logger.error(f"[StreamingOpenAI] stream_response error: {e}", exc_info=True)
     def _should_flush(self, buffer: str) -> bool:
         buffer = buffer.strip()
         if not buffer:

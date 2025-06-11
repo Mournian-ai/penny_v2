@@ -32,3 +32,11 @@ class ContextManager:
         parts.append("[USER INPUT]\n" + biased_input)
 
         return "\n\n".join(parts)
+
+
+    def record_emotion(self, tone: str, emotion: str):
+        """Store the latest emotional state (for prompt context or behavioral adaptation)."""
+        if not hasattr(self, "last_emotions"):
+            from collections import deque
+            self.last_emotions = deque(maxlen=10)
+        self.last_emotions.append((tone, emotion))
